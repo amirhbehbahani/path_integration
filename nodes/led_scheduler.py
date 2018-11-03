@@ -2,15 +2,17 @@ from led_pwm_proxy import LedPwmProxy
 
 class LedScheduler(object):
 
-    def __init__(self) :
+    def __init__(self,params) :
 
-        self.led_pin = 3
-        self.led_on_value = 255
-        self.led_off_value = 0
+        # Extract parameters 
+        self.led_pin = params['pin'] 
+        self.led_on_value =  params['on_value']
+        self.led_off_value = params['off_value'] 
+        self.on_duration = params['on_duration'] 
+        self.minimum_off_duration = params['minimum_off_duration']
 
-        self.on_duration = 1.0
-        self.minimum_off_duration = 9.0
 
+        # State
         self.led_on = False 
         self.last_on_t  = 0.0
         self.activation_count = 0

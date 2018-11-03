@@ -22,12 +22,27 @@ class PathIntegrationNode(object):
         self.tracked_objects_sub = rospy.Subscriber('/multi_tracker/' + self.nodenum + '/tracked_objects', Trackedobjectlist, self.tracked_objects_callback)
 
         self.fly_queue = Queue.Queue()
-        self.led_scheduler = LedScheduler()
 
-	self.food_x = rospy.get_param('food_x', 100)           # food x coordinate, place holder checked
-	self.food_y = rospy.get_param('food_y', 245 )          # food y coordinate, place holder checked
-	self.food_width = rospy.get_param('food_width', 30)    # x threshhold, place holder 
-	self.food_height = rospy.get_param('food_height', 30)  # y threshhold, place holder
+        self.led_pins = rospy.get_param('led_pins', [3,10])
+        self.food_positions = rospy.get_param('food_positions', [(140,76),(224,163)])
+        self.scheduler_base_params = rospy.get_param(
+                'scheduler_base_params', 
+                { 
+                    'on_value' : 100, 
+                    'off_value' : 0, 
+                    'on_duration' : 1.0, 
+                    'minimum_off_duration': 9.0, 
+                    }
+                )
+	self.food_width = rospy.get_param('food_width', 10)    # x threshhold, place holder 
+	self.food_height = rospy.get_param('food_height', 10)  # y threshhold, place holder
+        
+        self.led_schedulers = []
+        for pin in self.led_pins:
+            params = dict(self.scheduler_base_params)
+            params['pin'] = pin
+            self.led_schedulers.append(LedScheduler(params))
+
 
         self.data_pub = rospy.Publisher('path_integration_data', PathIntegrationData, queue_size=10) 
 
@@ -37,31 +52,36 @@ class PathIntegrationNode(object):
             fly = max(data.tracked_objects, key = attrgetter('size'))
             self.fly_queue.put(fly)
 
-    def on_food_test(self,fly):
-        test_x = abs(fly.position.x - self.food_x) < self.food_width/2.0 
-        test_y = abs(fly.position.y - self.food_y) < self.food_height/2.0 
+    def on_food_test(self,fly,food_position):
+        food_x, food_y = food_position
+        test_x = abs(fly.position.x - food_x) < self.food_width/2.0 
+        test_y = abs(fly.position.y - food_y) < self.food_height/2.0 
         return test_x and test_y
 
     def run(self):
         while not rospy.is_shutdown():
             while (self.fly_queue.qsize() > 0):
                 fly = self.fly_queue.get()
-                fly_on_food = self.on_food_test(fly) 
-                self.led_scheduler.update(rospy.Time.now().to_time(), fly_on_food)
-                
-                header = std_msgs.msg.Header()
-                header.stamp = rospy.Time.now()
-                data = PathIntegrationData( 
-                            header, 
-                            fly, 
-                            fly_on_food, 
-                            self.led_scheduler.activation_count
-                            )
-                self.data_pub.publish(data)
+                for scheduler, food_position in zip(self.led_schedulers, self.food_positions):
+                    fly_on_food = self.on_food_test(fly,food_position)
+                    print(fly_on_food, fly.position.x, fly.position.y, food_position)
+                    scheduler.update(rospy.Time.now().to_time(), fly_on_food)
+
+                    header = std_msgs.msg.Header()
+                    header.stamp = rospy.Time.now()
+                    data = PathIntegrationData( 
+                                header, 
+                                fly, 
+                                fly_on_food,
+                                food_position,
+                                scheduler.led_pin, 
+                                scheduler.activation_count
+                                )
+                    self.data_pub.publish(data)
 
             # Dummy update - so that scheduler keeps updating when there are no fly events
-            self.led_scheduler.update(rospy.Time.now().to_time(), False)
-
+            for scheduler in self.led_schedulers:
+                scheduler.update(rospy.Time.now().to_time(), False)
         
 
 # -----------------------------------------------------------------------------
@@ -69,4 +89,3 @@ if __name__ == '__main__':
 
     node = PathIntegrationNode() 
     node.run()
-
