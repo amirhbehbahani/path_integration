@@ -5,8 +5,11 @@ import roslib
 import rospy
 import numpy
 import std_msgs.msg
+import cv2
 
 from operator import attrgetter
+from sensor_msgs.msg import Image
+from cv_bridge import CvBridge, CvBridgeError
 
 from multi_tracker.msg import Trackedobject, Trackedobjectlist
 from led_scheduler import LedScheduler
@@ -36,6 +39,10 @@ class PathIntegrationNode(object):
                 )
 	self.food_width = rospy.get_param('food_width', 10)    # x threshhold, place holder 
 	self.food_height = rospy.get_param('food_height', 10)  # y threshhold, place holder
+
+
+        self.bridge = CvBridge()
+        self.image_sub = rospy.Subscriber('/camera/image_mono', Image, self.image_callback)
         
         self.led_schedulers = []
         for pin in self.led_pins:
@@ -45,6 +52,22 @@ class PathIntegrationNode(object):
 
 
         self.data_pub = rospy.Publisher('path_integration_data', PathIntegrationData, queue_size=10) 
+
+    def image_callback(self,imgmsg):
+        cv_image = self.bridge.imgmsg_to_cv2(imgmsg,desired_encoding='mono8')
+        cv_image_bgr = cv2.cvtColor(cv_image, cv2.COLOR_GRAY2BGR)
+
+        for pos in self.food_positions:
+            cx, cy = pos
+            x0 = int(cx - self.food_width/2.0)
+            y0 = int(cy - self.food_height/2.0)
+            x1 = int(cx + self.food_width/2.0)
+            y1 = int(cy + self.food_height/2.0)
+            cv2.rectangle(cv_image_bgr, (x0,y0), (x1,y1), (0,0,255), 1)
+            
+        cv2.imshow('roi image',cv_image_bgr)
+        cv2.waitKey(1)
+
 
     def tracked_objects_callback(self,data):
         number_of_objects = len(data.tracked_objects)
@@ -64,7 +87,7 @@ class PathIntegrationNode(object):
                 fly = self.fly_queue.get()
                 for scheduler, food_position in zip(self.led_schedulers, self.food_positions):
                     fly_on_food = self.on_food_test(fly,food_position)
-                    print(fly_on_food, fly.position.x, fly.position.y, food_position)
+                    #print(fly_on_food, fly.position.x, fly.position.y, food_position)
                     scheduler.update(rospy.Time.now().to_time(), fly_on_food)
 
                     header = std_msgs.msg.Header()
